@@ -1,616 +1,246 @@
-**# ECE 520 Lab 4 — Custom AXI4-Lite IP on Zynq-7000**
+## **ECE 520 Lab 4 - Custom AXI-Lite IP**
 
+Hamza Sulehria
 
+Zybo Z7-10 | Vivado and Vitis 2023.1 | Verilog, VHDL, C
 
-**\*\*FPGA-Based Multiplier, Block RAM, and FIFO System\*\***
 
 
+**Overview**
 
-**\*\*Student:\*\* Hamza Sulehria**  
+For this lab, I built a Zynq-based system with three memory-mapped peripherals: a 16-bit multiplier, block RAM, and a custom FIFO. The ARM processor accesses each peripheral over AXI. I wrote the multiplier in Verilog, integrated the AXI BRAM Controller and Block Memory Generator, and wrapped my VHDL FIFO with an AXI4-Lite interface.
 
-**\*\*Target Board:\*\* Digilent Zybo Z7-10**  
 
-**\*\*FPGA:\*\* Xilinx Zynq-7010 (XC7Z010CLG400-1)**  
 
-**\*\*Development Tools:\*\* Vivado and Vitis 2023.1**  
+I verified the design in simulation and then tested it on the physical Zybo Z7-10. The final design was implemented at 50 MHz and met its timing constraints.
 
-**\*\*Languages:\*\* Verilog, VHDL, C, Tcl**
 
 
+#### **Hardware design**
 
-\## 1. Project Overview
+The final block design contains:
 
+\- Zynq-7000 Processing System, running bare-metal C applications
 
+\- AXI interconnect, connecting the processor to the peripherals
 
-This project demonstrates the design, integration, simulation, implementation, and hardware verification of custom AXI4-Lite peripherals on a Zynq-7000 FPGA development board.
+\- Custom AXI4-Lite multiplier, using 16-bit unsigned operands
 
+\- AXI BRAM Controller and Block Memory Generator
 
+\- Custom AXI4-Lite FIFO, built around the VHDL FIFO from Lab 3
 
-The project integrates three hardware components into a processor-controlled system:
+The multiplier and FIFO are independent peripherals. The C application controls them by reading and writing their registers. In the BRAM test, the processor reads each multiplication result and writes it into BRAM; the multiplier does not write to BRAM directly.
 
 
 
-1\. \*\*Custom 16-bit multiplier:\*\* A Verilog hardware accelerator accessed through AXI4-Lite registers.
+**Address map**
 
-2\. \*\*AXI-connected Block RAM:\*\* Memory accessible to the ARM processor through an AXI BRAM Controller.
+\- Multiplier: 0x43C00000
 
-3\. \*\*Custom AXI4-Lite FIFO:\*\* A VHDL peripheral using a synchronous 16-bit-wide, 32-entry FIFO with software-accessible control and status registers.
+\- FIFO: 0x43C10000
 
+\- BRAM: 0x40000000
 
 
-The ARM Cortex-A9 processor communicates with these peripherals through memory-mapped AXI transactions.
 
+**Multiplier register offsets:**
 
+\- 0x00 - Operand A (16-bit input)
 
-The project was verified through RTL simulation, self-checking testbenches, C software applications, and execution on the physical Zybo Z7-10 board.
+\- 0x04 - Operand B (16-bit input)
 
+\- 0x08 - Product (32-bit output)
 
 
-\## 2. System Architecture
 
+#### **FIFO design**
 
+The FIFO stores 32 words of 16 bits each. It uses a one-cycle read latency, an almost-empty threshold of 1, and an almost-full threshold of 31. The AXI wrapper provides reset, write, read-request, and status registers.
 
-\### Hardware components
 
 
+**FIFO register offsets:**
 
-| Component | Function |
+\- 0x00 - Revision ID (read only)
 
-|---|---|
+\- 0x04 - FIFO reset (write only)
 
-| Zynq Processing System | Runs bare-metal C test applications |
+\- 0x08 - Write data, lower 16 bits (write only)
 
-| AXI Interconnect | Routes processor transactions to memory-mapped peripherals |
+\- 0x0C - Read request, bit 0 (write only)
 
-| Custom Multiplier AXI IP | Computes unsigned 16-bit multiplication |
+\- 0x10 - Read data, lower 16 bits (read only)
 
-| AXI BRAM Controller | Provides AXI access to FPGA block memory |
+\- 0x14 - Status (read only)
 
-| Block Memory Generator | Stores multiplication results for readback |
+\- 0x18 - Data count (read only)
 
-| Custom FIFO AXI IP | Buffers 16-bit data and provides FIFO control/status registers |
+\- 0x1C - FIFO configuration (read only)
 
+\- 0x20 - Almost-empty and almost-full thresholds (read only)
 
+\- 0x24 through 0x3C - Reserved, read as zero
 
-All custom AXI peripheral logic operates using the 50 MHz FPGA fabric clock.
 
 
+**Status bits:**
 
-\### AXI communication
+\- Bit 4 - Read valid
 
+\- Bit 3 - Almost full
 
+\- Bit 2 - Almost empty
 
-The Zynq ARM processor acts as the AXI master. Each hardware peripheral is mapped into the processor's address space.
+\- Bit 1 - Full
 
+\- Bit 0 - Empty
 
 
-For a write operation, the processor sends a register address and data through the AXI interconnect. For a read operation, the selected peripheral returns register data through the AXI read channel.
 
+An AXI write generates a single FIFO write or read-request pulse. To read a value, the software requests a read, polls the read-valid status bit, and then reads the data register. This avoids treating a read request as if its data were available immediately.
 
 
-The FIFO's internal memory is separate from the larger AXI Block Memory Generator used in the multiplier/BRAM exercise.
 
+#### **Testing**
 
 
-\## 3. Memory-Mapped Address Assignments
 
+**Multiplier**
 
+I first tested the multiplier through simulation, then used a bare-metal C program to write the operands and read the product over AXI. One hardware test used 8 and 8 and returned 64 (PASS).
 
-| Peripheral | Base Address |
 
-|---|---|
 
-| AXI Multiplier | `0x43C00000` |
+**Multiplier with BRAM**
 
-| Custom FIFO AXI IP | `0x43C10000` |
+The C program multiplied the integers 1 through 32 by themselves. It stored each result in BRAM, then read all 32 entries back and compared them against the expected squares. All 32 comparisons passed.
 
-| AXI BRAM Controller | `0x40000000` |
 
 
+**FIFO AXI simulation**
 
-\### Multiplier registers
+The self-checking VHDL testbench in sim/tb\_sc\_fifo\_axi.vhd exercises AXI4-Lite register accesses, FIFO reset, 32 writes and reads, FIFO ordering, status flags, overflow, and underflow.
 
 
 
-| Offset | Register | Function |
+Simulation result: PASS at 19,360 ns (19.36 us).
 
-|---|---|---|
 
-| `0x00` | Operand A | First 16-bit unsigned operand |
 
-| `0x04` | Operand B | Second 16-bit unsigned operand |
+**FIFO hardware test**
 
-| `0x08` | Product | 32-bit multiplication result |
+The Zynq ARM processor ran vitis/fifo\_test.c on the physical board. The test:
 
+1\. Read the revision, configuration, and threshold registers.
 
+2\. Reset the FIFO and checked that the count was zero.
 
-The processor writes the operands and reads the product through the AXI4-Lite interface.
+3\. Wrote 32 values from 0x1200 to 0x121F.
 
+4\. Confirmed the full condition and a count of 32.
 
+5\. Checked that an extra write did not increase the count.
 
-\## 4. Custom FIFO AXI IP
+6\. Read all 32 values back, checking each against the expected value.
 
+7\. Checked the empty and underflow behavior.
 
+Observed register values:
 
-The FIFO peripheral was implemented in VHDL and packaged as a reusable Vivado custom AXI4-Lite IP core.
+\- Revision: 0x52000004
 
+\- Configuration: 0x01002010
 
+\- Thresholds: 0x001F0001
 
-\### FIFO configuration
+\- Status after reset: 0x00000005 (empty and almost empty)
 
+\- Status after 32 writes: 0x0000000A (full and almost full)
 
+Hardware result: PASS - 32/32 FIFO reads.
 
-| Parameter | Value |
 
-|---|---|
 
-| Data width | 16 bits |
+#### **FPGA utilization and timing**
 
-| FIFO depth | 32 entries |
+Target device: XC7Z010CLG400-1 (Zybo Z7-10)
 
-| Read latency | 1 cycle |
 
-| Almost-empty threshold | 1 |
 
-| Almost-full threshold | 31 |
+Post-synthesis utilization:
 
-| Interface | AXI4-Lite |
+\- 2,110 LUTs (11.99%)
 
-| Clock frequency | 50 MHz |
+\- 2,974 slice registers (8.45%)
 
+\- 16.5 block RAM tiles (27.50%)
 
+\- 1 DSP48E1 (1.25%)
 
-The AXI interface uses a synchronous active-low reset, while the internal FIFO uses an active-high synchronous reset. The wrapper provides the required reset control.
 
 
+Post-implementation utilization:
 
-\### FIFO register map
+\- 1,891 LUTs (10.74%)
 
+\- 2,546 slice registers (7.23%)
 
+\- 16.5 block RAM tiles (27.50%)
 
-All registers are accessed through 32-bit AXI4-Lite transactions.
+\- 1 DSP48E1 (1.25%)
 
 
 
-| Offset | Register | Access | Description |
+Post-route timing at 50 MHz (20 ns period):
 
-|---|---|---|---|
+\- Worst setup slack: +9.866 ns
 
-| `0x00` | FPGA\_REV\_REG | RO | Peripheral identification |
+\- Total negative slack: 0.000 ns
 
-| `0x04` | FIFO\_RST\_REG | WO | Software reset |
+\- Worst hold slack: +0.042 ns
 
-| `0x08` | WR\_DATA\_REG | WO | Write one 16-bit FIFO value |
+\- Failing setup and hold endpoints: 0
 
-| `0x0C` | RD\_REQ\_REG | WO | Request one FIFO read |
+Vivado reported that all user-specified timing constraints were met. The full reports are saved in reports/.
 
-| `0x10` | RD\_DATA\_REG | RO | Registered FIFO read data |
 
-| `0x14` | STATUS\_REG | RO | FIFO status and read-valid flags |
 
-| `0x18` | DATA\_COUNT\_REG | RO | Number of stored words |
+#### **Repository contents**
 
-| `0x1C` | CONFIG\_REG | RO | FIFO configuration |
+\- src/ - Multiplier and FIFO RTL, including their AXI wrappers
 
-| `0x20` | THRESHOLD\_REG | RO | Almost-full and almost-empty thresholds |
+\- ip\_repo/ - Packaged Vivado IP cores and metadata
 
-| `0x24–0x3C` | Reserved | RO | Reserved offsets read as zero |
+\- sim/ - Self-checking FIFO AXI testbench
 
+\- vitis/ - Bare-metal C tests for multiplier, BRAM, and FIFO
 
+\- scripts/ - Vivado project, block-design, and simulation Tcl scripts
 
-\### STATUS\_REG bit definitions
+\- vivado/ - Saved Vivado block design
 
+\- reports/ - Synthesis, implementation, and timing reports
 
+\- screenshots/ - Screenshots from the lab demonstration (added separately)
 
-| Bit | Signal | Meaning |
 
-|---|---|---|
 
-| 4 | RD\_VALID | A requested FIFO read has completed |
+#### **Running the design**
 
-| 3 | ALMOST\_FULL | Occupancy has reached the almost-full threshold |
+The project was built using Vivado and Vitis 2023.1 for the Zybo Z7-10. The packaged IP cores are under ip\_repo/, and the final block design is under vivado/. Tcl exports are provided in scripts/.
 
-| 2 | ALMOST\_EMPTY | Occupancy is at or below the almost-empty threshold |
 
-| 1 | FULL | FIFO contains 32 entries |
 
-| 0 | EMPTY | FIFO contains no entries |
+To reproduce the hardware test, create or open the Vivado project, make the packaged IP available to Vivado, generate the bitstream, and program the Zybo. Build and download the appropriate C application using Vitis or XSCT. Open the board's serial port at 115200 baud, 8 data bits, no parity, and 1 stop bit to view the results.
 
 
 
-After reset, the expected status is `0x00000005`, indicating `EMPTY=1` and `ALMOST\_EMPTY=1`.
+The Tcl exports reflect the original Windows setup. Some paths may need to be adjusted on another computer; a clean rebuild from these exported scripts has not been independently verified.
 
 
 
-After filling the FIFO with 32 words, the observed status is `0x0000000A`, indicating `FULL=1` and `ALMOST\_FULL=1`.
+#### **Result**
 
-
-
-\### FIFO transaction behavior
-
-
-
-The AXI wrapper converts software write commands into one-cycle FIFO control pulses. This prevents a single AXI register transaction from generating repeated FIFO writes or reads.
-
-
-
-For reading, software sends a request through RD\_REQ\_REG, polls STATUS\_REG until RD\_VALID is asserted, and then reads the result from RD\_DATA\_REG.
-
-
-
-The FIFO maintains first-in, first-out ordering.
-
-
-
-\## 5. Verification Methodology
-
-
-
-Verification was conducted at both simulation and physical-hardware levels.
-
-
-
-\### 5.1 Multiplier verification
-
-
-
-The multiplier was tested using an RTL testbench and a processor-based C program.
-
-
-
-The C program writes operands into memory-mapped AXI registers and checks the returned product.
-
-
-
-A physical hardware test using operands 8 and 8 returned a product of 64 and reported PASS.
-
-
-
-\### 5.2 Multiplier and BRAM verification
-
-
-
-A second C application performs 32 multiplications using values 1 through 32.
-
-
-
-For each input, the processor writes the operands to the multiplier, reads the product, and stores it in the AXI-connected BRAM.
-
-
-
-The application subsequently reads all 32 results from BRAM and checks them against their expected squares.
-
-
-
-\*\*Hardware result:\*\* All 32 BRAM readback comparisons passed.
-
-
-
-\### 5.3 FIFO AXI simulation
-
-
-
-A self-checking VHDL testbench was developed to simulate AXI4-Lite transactions with the FIFO peripheral.
-
-
-
-The testbench verifies:
-
-
-
-\- Register-map behavior
-
-\- Software reset
-
-\- FIFO data writes
-
-\- FIFO data reads and read-valid behavior
-
-\- First-in, first-out ordering
-
-\- Full and empty status flags
-
-\- Almost-full and almost-empty behavior
-
-\- Overflow protection
-
-\- Underflow protection
-
-
-
-\*\*Simulation result:\*\* PASS at 19,360 ns (19.36 µs).
-
-
-
-\### 5.4 FIFO hardware verification
-
-
-
-A bare-metal C application was executed on the Zynq ARM processor.
-
-
-
-The software test performs the following operations:
-
-
-
-1\. Reads the FIFO revision, configuration, and threshold registers.
-
-2\. Resets the FIFO and checks that the occupancy count is zero.
-
-3\. Writes 32 consecutive values, from `0x1200` through `0x121F`.
-
-4\. Checks that DATA\_COUNT\_REG reads 32 and FULL is asserted.
-
-5\. Tests overflow protection by attempting an additional write while full.
-
-6\. Requests and reads all 32 FIFO entries.
-
-7\. Compares each returned value against the expected data.
-
-8\. Tests empty-FIFO and underflow behavior.
-
-
-
-The hardware returned:
-
-
-
-| Register | Observed Value |
-
-|---|---|
-
-| FPGA\_REV\_REG | `0x52000004` |
-
-| CONFIG\_REG | `0x01002010` |
-
-| THRESHOLD\_REG | `0x001F0001` |
-
-| Status after reset | `0x00000005` |
-
-| Count after reset | `0` |
-
-| Status after 32 writes | `0x0000000A` |
-
-| Count after 32 writes | `32` |
-
-
-
-\*\*Final hardware result: PASS — 32/32 FIFO reads.\*\*
-
-
-
-The returned sequence matched the original write sequence exactly, demonstrating correct FIFO ordering.
-
-
-
-\## 6. FPGA Resource Utilization
-
-
-
-\### Synthesis results
-
-
-
-| Resource | Used | Available | Utilization |
-
-|---|---:|---:|---:|
-
-| Slice LUTs | 2,110 | 17,600 | 11.99% |
-
-| Slice Registers | 2,974 | 35,200 | 8.45% |
-
-| Block RAM Tiles | 16.5 | 60 | 27.50% |
-
-| DSP48E1 | 1 | 80 | 1.25% |
-
-
-
-\### Final implementation results
-
-
-
-| Resource | Used | Available | Utilization |
-
-|---|---:|---:|---:|
-
-| Slice LUTs | 1,891 | 17,600 | 10.74% |
-
-| Slice Registers | 2,546 | 35,200 | 7.23% |
-
-| Block RAM Tiles | 16.5 | 60 | 27.50% |
-
-| DSP48E1 | 1 | 80 | 1.25% |
-
-
-
-Resource utilization decreased between synthesis and implementation as Vivado applied additional optimization.
-
-
-
-The design uses one DSP48E1 arithmetic primitive and a total of 16 RAMB36E1 blocks plus one RAMB18E1 block.
-
-
-
-The implemented system fits within the FPGA resource limits.
-
-
-
-\## 7. Timing Analysis
-
-
-
-Timing analysis was performed on the fully routed design.
-
-
-
-| Timing Metric | Result |
-
-|---|---:|
-
-| Clock Frequency | 50 MHz |
-
-| Clock Period | 20.000 ns |
-
-| Worst Setup Slack | +9.866 ns |
-
-| Total Negative Slack | 0.000 ns |
-
-| Worst Hold Slack | +0.042 ns |
-
-| Total Hold Slack Violations | 0 |
-
-| Failing Setup Endpoints | 0 |
-
-| Failing Hold Endpoints | 0 |
-
-
-
-\*\*Vivado result: All user-specified timing constraints are met.\*\*
-
-
-
-The reported setup and hold slack are positive, indicating that the routed design meets the specified 50 MHz clock timing requirements.
-
-
-
-\## 8. Repository Organization
-
-
-
-| Directory | Contents |
-
-|---|---|
-
-| `src/` | Verilog and VHDL hardware source files |
-
-| `ip\_repo/` | Packaged custom AXI IP cores and metadata |
-
-| `sim/` | FIFO AXI self-checking VHDL testbench |
-
-| `vitis/` | Multiplier, multiplier/BRAM, and FIFO C programs |
-
-| `scripts/` | Vivado project-generation and simulation Tcl scripts |
-
-| `vivado/` | Final Vivado Block Design |
-
-| `reports/` | Synthesis, implementation utilization, and timing reports |
-
-| `screenshots/` | Vivado and hardware demonstration evidence |
-
-
-
-\### Important source files
-
-
-
-\- `multiplier\_16\_bit.v` — unsigned multiplication logic
-
-\- `mult\_16\_bit\_v1\_0\_S00\_AXI.v` — multiplier AXI register interface
-
-\- `sc\_fifo.vhd` — FIFO storage and control logic
-
-\- `sc\_fifo\_axi\_v1\_0\_S00\_AXI.vhd` — FIFO AXI register interface
-
-\- `sc\_fifo\_axi\_v1\_0.vhd` — FIFO AXI peripheral top level
-
-\- `tb\_sc\_fifo\_axi.vhd` — self-checking FIFO AXI simulation
-
-\- `fifo\_test.c` — ARM-based FIFO hardware verification
-
-
-
-\## 9. Reproducing the Project
-
-
-
-\### Requirements
-
-
-
-\- AMD Vivado 2023.1
-
-\- AMD Vitis / XSCT 2023.1
-
-\- Zybo Z7-10 development board
-
-\- USB-JTAG and USB-UART connectivity
-
-\- Serial terminal such as PuTTY
-
-
-
-\### FPGA design
-
-
-
-The final design is based on `mult\_bd\_hs` in Vivado.
-
-
-
-The packaged AXI IP cores are included in `ip\_repo/`, while the design and project Tcl scripts are in `scripts/`.
-
-
-
-On a different computer, project paths and IP repository locations may need to be adjusted before regenerating the design. The supplied scripts have not been independently validated as a clean, one-command rebuild.
-
-
-
-\### Simulation
-
-
-
-Open the FIFO simulation setup, compile the VHDL source files and testbench, and run the behavioral simulation.
-
-
-
-The expected testbench result is:
-
-
-
-`PASS: AXI FIFO register map, 32 writes/reads, flags, reset and overflow/underflow`
-
-
-
-\### Hardware verification
-
-
-
-Generate and program the bitstream for the final Vivado design.
-
-
-
-Run the corresponding bare-metal C application on the ARM processor using Vitis/XSCT.
-
-
-
-Monitor serial output through the board's USB-UART connection at 115200 baud, 8 data bits, no parity, and 1 stop bit.
-
-
-
-The FIFO test is successful when all 32 values are read back correctly and the application reports:
-
-
-
-`RESULT: PASS - 32/32 FIFO READS`
-
-
-
-\## 10. Results and Conclusion
-
-
-
-This project successfully demonstrates custom AXI4-Lite peripheral development from RTL implementation through physical FPGA verification.
-
-
-
-The multiplier produced correct arithmetic results, the BRAM stored and returned all 32 tested multiplication products, and the VHDL FIFO successfully handled 32 writes and reads while preserving data ordering.
-
-
-
-The custom FIFO was verified using both an AXI transaction-level VHDL testbench and a C application running on the physical Zynq processor.
-
-
-
-Finally, Vivado implementation reports confirmed that the complete design fits within the Zybo Z7-10 FPGA resources and meets the specified timing constraints at 50 MHz.
+The multiplier and BRAM tests passed on hardware, and the FIFO returned all 32 test words in order. The FIFO AXI simulation passed, and the routed FPGA design met the 50 MHz timing constraints.
 
